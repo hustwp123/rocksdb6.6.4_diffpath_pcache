@@ -395,40 +395,40 @@ class VersionBuilder::Rep {
 
   Status LoadTableHandlers(InternalStats* internal_stats, int max_threads,
                            bool prefetch_index_and_filter_in_cache,
-                           bool is_initial_load,
+                           bool,// is_initial_load,
                            const SliceTransform* prefix_extractor) {
     assert(table_cache_ != nullptr);
 
-    size_t table_cache_capacity = table_cache_->get_cache()->GetCapacity();
-    bool always_load = (table_cache_capacity == TableCache::kInfiniteCapacity);
+    //size_t table_cache_capacity = table_cache_->get_cache()->GetCapacity();
+    //bool always_load = (table_cache_capacity == TableCache::kInfiniteCapacity);
     size_t max_load = port::kMaxSizet;
 
-    if (!always_load) {
-      // If it is initial loading and not set to always laoding all the
-      // files, we only load up to kInitialLoadLimit files, to limit the
-      // time reopening the DB.
-      const size_t kInitialLoadLimit = 16;
-      size_t load_limit;
-      // If the table cache is not 1/4 full, we pin the table handle to
-      // file metadata to avoid the cache read costs when reading the file.
-      // The downside of pinning those files is that LRU won't be followed
-      // for those files. This doesn't matter much because if number of files
-      // of the DB excceeds table cache capacity, eventually no table reader
-      // will be pinned and LRU will be followed.
-      if (is_initial_load) {
-        load_limit = std::min(kInitialLoadLimit, table_cache_capacity / 4);
-      } else {
-        load_limit = table_cache_capacity / 4;
-      }
+    // if (!always_load) {
+    //   // If it is initial loading and not set to always laoding all the
+    //   // files, we only load up to kInitialLoadLimit files, to limit the
+    //   // time reopening the DB.
+    //   const size_t kInitialLoadLimit = 16;
+    //   size_t load_limit;
+    //   // If the table cache is not 1/4 full, we pin the table handle to
+    //   // file metadata to avoid the cache read costs when reading the file.
+    //   // The downside of pinning those files is that LRU won't be followed
+    //   // for those files. This doesn't matter much because if number of files
+    //   // of the DB excceeds table cache capacity, eventually no table reader
+    //   // will be pinned and LRU will be followed.
+    //   if (is_initial_load) {
+    //     load_limit = std::min(kInitialLoadLimit, table_cache_capacity / 4);
+    //   } else {
+    //     load_limit = table_cache_capacity / 4;
+    //   }
 
-      size_t table_cache_usage = table_cache_->get_cache()->GetUsage();
-      if (table_cache_usage >= load_limit) {
-        // TODO (yanqin) find a suitable status code.
-        return Status::OK();
-      } else {
-        max_load = load_limit - table_cache_usage;
-      }
-    }
+    //   size_t table_cache_usage = table_cache_->get_cache()->GetUsage();
+    //   if (table_cache_usage >= load_limit) {
+    //     // TODO (yanqin) find a suitable status code.
+    //     return Status::OK();
+    //   } else {
+    //     max_load = load_limit - table_cache_usage;
+    //   }
+    // }
 
     // <file metadata, level>
     std::vector<std::pair<FileMetaData*, int>> files_meta;

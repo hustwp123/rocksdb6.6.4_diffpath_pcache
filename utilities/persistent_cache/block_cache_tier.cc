@@ -201,6 +201,11 @@ Status BlockCacheTier::Insert(const Slice& key, const char* data,
   // update stats
   stats_.bytes_pipelined_.Add(size);
 
+  if(is_meta_block)
+  {
+    fprintf(stderr,"insert size=%ld\n",size);
+  }
+
   if (opt_.pipeline_writes) {
     // off load the write to the write thread
     insert_ops_.Push(
@@ -223,7 +228,7 @@ void BlockCacheTier::InsertMain() {
 
     size_t retry = 0;
     Status s;
-    while ((s = InsertImpl(Slice(op.key_), Slice(op.data_))).IsTryAgain()) {
+    while ((s = InsertImpl(Slice(op.key_), Slice(op.data_),op.is_meta_block_)).IsTryAgain()) {
       if (retry > kMaxRetry) {
         break;
       }

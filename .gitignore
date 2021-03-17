@@ -1,5 +1,5 @@
 make_config.mk
-
+*.log
 *.a
 *.arc
 *.d
