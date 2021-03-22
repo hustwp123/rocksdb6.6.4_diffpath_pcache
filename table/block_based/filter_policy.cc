@@ -7,14 +7,21 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file. See the AUTHORS file for names of contributors.
 
-#include <array>
-
 #include "rocksdb/filter_policy.h"
 
+#include <array>
+#include <tries/path_decomposed_trie.hpp>
+#include <tries/vbyte_string_pool.hpp>
+#include <time.h>
+
+#include "compacted_trie_builder.hpp"
 #include "rocksdb/slice.h"
+#include "succinct/bp_vector.hpp"
+#include "succinct/elias_fano.hpp"
+#include "succinct/forward_enumerator.hpp"
 #include "table/block_based/block_based_filter_block.h"
-#include "table/block_based/full_filter_block.h"
 #include "table/block_based/filter_policy_internal.h"
+#include "table/block_based/full_filter_block.h"
 #include "third-party/folly/folly/ConstexprMath.h"
 #include "util/bloom_impl.h"
 #include "util/coding.h"
@@ -23,6 +30,446 @@
 namespace rocksdb {
 
 namespace {
+
+
+// xp
+class OtLexPdtBloomBitsBuilder : public BuiltinFilterBitsBuilder {
+ public:
+  explicit OtLexPdtBloomBitsBuilder()
+      :ot_pdt() {
+    fprintf(stderr, "constructing OtLexPdtBloomBitsBuilder()\n");
+  }
+
+  // No Copy allowed
+  OtLexPdtBloomBitsBuilder(const OtLexPdtBloomBitsBuilder&) = delete;
+  void operator=(const OtLexPdtBloomBitsBuilder&) = delete;
+
+  ~OtLexPdtBloomBitsBuilder() override {}
+
+  virtual void AddKey(const Slice& key) override {
+//    fprintf(stderr, "in OtLexPdtBloomBitsBuilder::AddKey() idpaeq\n");
+    std::string key_string(key.data(), key.data()+key.size());
+    key_strings_.push_back(key_string);
+  }
+
+  uint32_t CalculateSpace(const int num_entry) override {
+    return static_cast<uint32_t>(CalculateByteSpace());
+  }
+
+  virtual Slice Finish(std::unique_ptr<const char[]>* buf) override {
+//    fprintf(stderr, "in OtLexPdtBloomBitsBuilder::Finish() 8qpeye\n");
+    // generate a compacted trie and get essential data
+    assert(key_strings_.size() > 0);
+    key_strings_.erase(unique(key_strings_.begin(),
+                              key_strings_.end()),
+                       key_strings_.end()); //xp, for now simply dedup keys
+
+//    fprintf(stdout, "DEBUG w7zvbg key_strings_.size: %lu\n", key_strings_.size());
+
+    auto chrono_start = std::chrono::system_clock::now();
+    ot_pdt.construct_compacted_trie(key_strings_, false); // ot_pdt.pub_ are inited
+    auto chrono_end = std::chrono::system_clock::now();
+    std::chrono::microseconds elapsed_us = std::chrono::duration_cast<std::chrono::microseconds>(chrono_end-chrono_start);
+    std::cout << "DEBUG 3yb6fo Finis() ot_pdt use " << key_strings_.size() << " keys build raw trie takes(us) " <<
+              elapsed_us.count() << std::endl;
+
+    // get the byte size of key_strings_
+    uint64_t ot_lex_pdt_byte_size = CalculateByteSpace();
+    assert(ot_lex_pdt_byte_size > 0);
+    uint64_t buf_byte_size = ot_lex_pdt_byte_size + 5;
+//    fprintf(stderr, "DEBUG 10dk3 compacted trie byte size: %lu\n", buf_byte_size);
+
+    char* contents = new char[buf_byte_size];
+    memset(contents, 0, buf_byte_size);
+    assert(contents);
+
+    //xp, be compatible with new bloom filter (full filter)
+    // See BloomFilterPolicy::GetBloomBitsReader re: metadata
+    // -1 = Marker for newer Bloom implementations
+    char new_impl = static_cast<char>(-1);
+//    contents[byte_size] = static_cast<char>(-1);
+    // 0 = Marker for this sub-implementation, ot lex pdt
+    char sub_impl = static_cast<char>(80); // 'P'
+//    contents[byte_size+1] = static_cast<char>(5);
+    // just for padding
+    // when full filter: num_probes (and 0 in upper bits for 64-byte block size)
+    char fake_num_probes = static_cast<char>(7);
+//    contents[byte_size+2] = static_cast<char>(7);
+    // rest of metadata (2 chars) are paddings
+
+    // format essential data with format
+    // vec<uint16_t>,
+    // vec<uint16_t>,
+    // vec<uint8_t>,
+    // vec<uint8_t>,
+    // vec<uint64_t>,
+    // uint64_t
+    // char
+    // char
+    // char
+    // & ot lex pdt byte size
+    // target buffer
+//    fprintf(stdout, "DEBUG a3gcn6 in otFinish sizes for string,label,branch,char,bit,size:%ld,%ld,%ld,%ld,%ld,%ld\n",
+//            ot_pdt.pub_m_centroid_path_string.size(),
+//            ot_pdt.pub_m_labels.size(),
+//            ot_pdt.pub_m_centroid_path_branches.size(),
+//            ot_pdt.pub_m_branching_chars.size(),
+//            ot_pdt.pub_m_bp_m_bits.size(),
+//            ot_pdt.pub_m_bp_m_size);
+    PutIntoCharArray(ot_pdt.pub_m_centroid_path_string,
+                     ot_pdt.pub_m_labels,
+                     ot_pdt.pub_m_centroid_path_branches,
+                     ot_pdt.pub_m_branching_chars,
+                     ot_pdt.pub_m_bp_m_bits,
+                     ot_pdt.pub_m_bp_m_size,
+                     new_impl,
+                     sub_impl,
+                     fake_num_probes,
+                     buf_byte_size,
+                     contents);
+
+//    for (size_t i = 0; i < ot_pdt.pub_m_centroid_path_string.size(); i++) {
+//      fprintf(stdout, "Pstring:%ld,%d\n", i, ot_pdt.pub_m_centroid_path_string[i]);
+//    }
+//    for (size_t i = 0; i < ot_pdt.pub_m_labels.size(); i++) {
+//      fprintf(stdout, "Plabel:%ld,%d\n", i, ot_pdt.pub_m_labels[i]);
+//    }
+//    for (size_t i = 0; i < ot_pdt.pub_m_centroid_path_branches.size(); i++) {
+//      fprintf(stdout, "Pbranch:%ld,%d\n", i, ot_pdt.pub_m_centroid_path_branches[i]);
+//    }
+//    for (size_t i = 0; i < ot_pdt.pub_m_branching_chars.size(); i++) {
+//      fprintf(stdout, "Pchar:%ld,%d\n", i, ot_pdt.pub_m_branching_chars[i]);
+//    }
+//    for (size_t i = 0; i < ot_pdt.pub_m_bp_m_bits.size(); i++) {
+//      fprintf(stdout, "Pbit:%ld,%ld\n", i, ot_pdt.pub_m_bp_m_bits[i]);
+//    }
+
+    assert(sizeof(ot_pdt.pub_m_bp_m_size) != 0);
+
+    // return a Slice with data and its byte length
+    const char* const_data = contents;
+    buf->reset(const_data);
+    key_strings_.clear();
+    return Slice(contents, buf_byte_size);
+//=============
+//    uint32_t len_with_metadata =
+//        CalculateSpace(static_cast<uint32_t>(hash_entries_.size()));
+//    char* data = new char[len_with_metadata];
+//    memset(data, 0, len_with_metadata);
+//
+//    assert(data);
+//    assert(len_with_metadata >= 5);
+//
+//    uint32_t len = len_with_metadata - 5;
+//    if (len > 0) {
+//      AddAllEntries(data, len);
+//    }
+
+    // See BloomFilterPolicy::GetBloomBitsReader re: metadata
+    // -1 = Marker for newer Bloom implementations
+//    data[len] = static_cast<char>(-1);
+    // 0 = Marker for this sub-implementation
+//    data[len + 1] = static_cast<char>(0);
+    // num_probes (and 0 in upper bits for 64-byte block size)
+//    data[len + 2] = static_cast<char>(num_probes_);
+    // rest of metadata stays zero
+
+//    const char* const_data = data;
+//    buf->reset(const_data);
+//    hash_entries_.clear();
+//    return Slice(data, len_with_metadata);
+  }
+
+  // ot lex pdt used byte size
+  uint64_t CalculateByteSpace() {
+    // calculate the byte size of format buf
+    return (ot_pdt.pub_m_centroid_path_string.size()+ot_pdt.pub_m_labels.size())*2 +
+        ot_pdt.pub_m_centroid_path_branches.size()+ ot_pdt.pub_m_branching_chars.size() +
+        ot_pdt.pub_m_bp_m_bits.size() * 8 + 8 +
+        5 * 4; // sizes of above vectors
+  }
+
+  // put essential data into char[], and this char[] will be stored in the Slice
+  // of a particular Table.
+  //  NOTE: total used byte == byte_size (ot lex pdt byte size) + 5
+  char* PutIntoCharArray(std::vector<uint16_t>& v1, std::vector<uint16_t>& v2,
+                         std::vector<uint8_t>& v3, std::vector<uint8_t>& v4,
+                         std::vector<uint64_t>& v5, uint64_t num,
+                         char new_impl, char sub_impl, char fake_num_probes,
+                         uint64_t& byte_size, char*& buf) {
+//    byte_size =
+//        (v1.size() + v2.size()) * 2 + v3.size() + v4.size() + v5.size() * 8 + 8;
+//    byte_size += 5 * 4 + 5;  //指明4个vector的size + 5 padding chars
+//
+    buf = new char[byte_size];
+    memset(buf, 0, byte_size);
+
+    uint32_t* p = (uint32_t*)buf;
+    *p = v1.size();
+    uint16_t* p1 = (uint16_t*)(buf + 4);
+    for (uint32_t i = 0; i < v1.size(); i++) {
+      *p1 = v1[i];
+      p1++;
+    }
+
+    p = (uint32_t*)(buf + 4 + v1.size() * 2);
+    *p = v2.size();
+    p1 = (uint16_t*)(buf + 4 + v1.size() * 2 + 4);
+    for (uint32_t i = 0; i < v2.size(); i++) {
+      *p1 = v2[i];
+      p1++;
+    }
+
+    p = (uint32_t*)(buf + 4 + v1.size() * 2 + 4 + v2.size() * 2);
+    *p = v3.size();
+    uint8_t* p2 = (uint8_t*)(buf + 4 + v1.size() * 2 + 4 + v2.size() * 2 + 4);
+    for (uint32_t i = 0; i < v3.size(); i++) {
+      *p2 = v3[i];
+      p2++;
+    }
+
+    p = (uint32_t*)(buf + 4 + v1.size() * 2 + 4 + v2.size() * 2 + 4 +
+                    v3.size());
+    *p = v4.size();
+    p2 = (uint8_t*)(buf + 4 + v1.size() * 2 + 4 + v2.size() * 2 + 4 +
+                    v3.size() + 4);
+    for (uint32_t i = 0; i < v4.size(); i++) {
+      *p2 = v4[i];
+      p2++;
+    }
+
+    p = (uint32_t*)(buf + 4 + v1.size() * 2 + 4 + v2.size() * 2 + 4 +
+                    v3.size() + 4 + v4.size());
+    *p = v5.size();
+//    fprintf(stderr, "DEBUG h8qd8z PutIntoCharArray m_bits.size(): %u\n", *p);
+    uint64_t* p4 = (uint64_t*)(buf + 4 + v1.size() * 2 + 4 + v2.size() * 2 + 4 +
+                               v3.size() + 4 + v4.size() + 4);
+    for (uint32_t i = 0; i < v5.size(); i++) {
+      *p4 = v5[i];
+      p4++;
+    }
+
+    uint64_t* p3 = (uint64_t*)(buf + 4 + v1.size() * 2 + 4 + v2.size() * 2 + 4 +
+                               v3.size() + 4 + v4.size() + 4 + v5.size() * 8);
+    *p3 = num;
+//    fprintf(stderr, "DEBUG yz92dt PutIntoCharArray num: %lu, *p3:%lu\n", num, *p3);
+
+    // new bloom filter implementation indicators for GetBloomBitsReader
+    char* pc1 = (char*)(buf + 4 + v1.size() * 2 + 4 + v2.size() * 2 + 4 +
+                        v3.size() + 4 + v4.size() + 4 + v5.size() * 8 + 8);
+    *pc1 = new_impl;
+    char* pc2 = (char*)(buf + 4 + v1.size() * 2 + 4 + v2.size() * 2 + 4 +
+                        v3.size() + 4 + v4.size() + 4 + v5.size() * 8 + 8 + 1);
+    *pc2 = sub_impl;
+    char* pc3 = (char*)(buf + 4 + v1.size() * 2 + 4 + v2.size() * 2 + 4 +
+                        v3.size() + 4 + v4.size() + 4 + v5.size() * 8 + 8 + 1 + 1);
+    *pc3 = fake_num_probes;
+//    char* pc4 = (char*)(buf + 4 + v1.size() * 2 + 4 + v2.size() * 2 + 4 +
+//                        v3.size() + 4 + v4.size() + 4 + v5.size() * 8 + 8 + 1 + 1 + 1);
+//    *pc4 = static_cast<char>(0);
+//    char* pc5 = (char*)(buf + 4 + v1.size() * 2 + 4 + v2.size() * 2 + 4 +
+//                        v3.size() + 4 + v4.size() + 4 + v5.size() * 8 + 8 + 1 + 1 + 1 + 1);
+//    *pc5 = static_cast<char>(0);
+
+    return buf;
+  }
+
+
+  std::vector<std::string> key_strings_;  // vector for Slice.data
+
+  // a compacted trie, NO need for a ot lex pdt yet
+  rocksdb::succinct::tries::path_decomposed_trie<
+      rocksdb::succinct::tries::vbyte_string_pool, true>
+      ot_pdt;
+};
+
+class OtLexPdtBloomBitsReader : public FilterBitsReader {
+ public:
+  explicit OtLexPdtBloomBitsReader() {
+//    fprintf(stderr, "DEBUG pqc7a26 init OtLexPdtBloomBitsReader\n");
+  }
+
+  explicit OtLexPdtBloomBitsReader(const char* buf) {
+    // construct a ot lex pdt
+    // restore essential members from buf
+    ot_pdt.pub_m_centroid_path_string.clear();
+    ot_pdt.pub_m_labels.clear();
+    ot_pdt.pub_m_centroid_path_branches.clear();
+    ot_pdt.pub_m_branching_chars.clear();
+    ot_pdt.pub_m_bp_m_bits.clear();
+    RecoverFromCharArray(ot_pdt.pub_m_centroid_path_string,
+                         ot_pdt.pub_m_labels,
+                         ot_pdt.pub_m_centroid_path_branches,
+                         ot_pdt.pub_m_branching_chars,
+                         ot_pdt.pub_m_bp_m_bits,
+                         ot_pdt.pub_m_bp_m_size,
+                         new_impl,
+                         sub_impl,
+                         fake_num_probes,
+                         buf);
+//    fprintf(stdout, "DEBUG uq7zbt in otReader sizes for string,label,branch,char,bit,size:%ld,%ld,%ld,%ld,%ld,%ld\n",
+//            ot_pdt.pub_m_centroid_path_string.size(),
+//            ot_pdt.pub_m_labels.size(),
+//            ot_pdt.pub_m_centroid_path_branches.size(),
+//            ot_pdt.pub_m_branching_chars.size(),
+//            ot_pdt.pub_m_bp_m_bits.size(),
+//            ot_pdt.pub_m_bp_m_size);
+
+    //    for (size_t i = 0; i < ot_pdt.pub_m_centroid_path_string.size(); i++) {
+//      fprintf(stdout, "Rstring:%ld,%d\n", i, ot_pdt.pub_m_centroid_path_string[i]);
+//    }
+//    for (size_t i = 0; i < ot_pdt.pub_m_labels.size(); i++) {
+//      fprintf(stdout, "Rlabel:%ld,%d\n", i, ot_pdt.pub_m_labels[i]);
+//    }
+//    for (size_t i = 0; i < ot_pdt.pub_m_centroid_path_branches.size(); i++) {
+//      fprintf(stdout, "Rbranch:%ld,%d\n", i, ot_pdt.pub_m_centroid_path_branches[i]);
+//    }
+//    for (size_t i = 0; i < ot_pdt.pub_m_branching_chars.size(); i++) {
+//      fprintf(stdout, "Rchar:%ld,%d\n", i, ot_pdt.pub_m_branching_chars[i]);
+//    }
+//    for (size_t i = 0; i < ot_pdt.pub_m_bp_m_bits.size(); i++) {
+//      fprintf(stdout, "Rbit:%ld,%ld\n", i, ot_pdt.pub_m_bp_m_bits[i]);
+//    }
+
+//    fprintf(stderr, "DEBUG c2ys95 after RecoverFromCharArray pub_m_bp_m_size:%lu pub_m_bp_m_bits.size():%lu\n",
+//            ot_pdt.pub_m_bp_m_size, ot_pdt.pub_m_bp_m_bits.size());
+    // init pub_* members, and create a ot lex pdt instance from it
+//        ot_pdt.init_pubs();
+//    auto chrono_start = std::chrono::system_clock::now();
+    ot_pdt.instance();
+//    auto chrono_end = std::chrono::system_clock::now();
+//    std::chrono::microseconds elapsed_us = std::chrono::duration_cast<std::chrono::microseconds>(chrono_end-chrono_start);
+//    std::cout << "DEBUG cor73n ot_pdt.instance() takes " <<
+//              elapsed_us.count() << " us." << std::endl;
+  }
+
+  // No Copy allowed
+  //  OtLexPdtBloomBitsReader(const&) = delete;
+  void operator=(const OtLexPdtBloomBitsReader&) = delete;
+
+  ~OtLexPdtBloomBitsReader() override {}
+
+  bool MayMatch(const Slice& key) override {
+    // idx = search_odt(key.data)
+    // if idx != -1, success
+    std::string key_string(key.data(), key.data()+key.size());
+//    auto chrono_start = std::chrono::system_clock::now();
+    size_t idx = ot_pdt.index(key_string);
+//    auto chrono_end = std::chrono::system_clock::now();
+//    std::chrono::microseconds elapsed_us = std::chrono::duration_cast<std::chrono::microseconds>(chrono_end-chrono_start);
+//    std::cout << "DEBUG la045n ot_pdt.index ret:" << idx << ", takes(us) " <<
+//              elapsed_us.count() << std::endl;
+
+    //    fprintf(stdout, "DEBUG ab42kf in OtLexPdtBloomBitsReader::MayMatch(%s): %ld\n",
+//            key.ToString().c_str(), idx);
+
+//     XXX for test
+//    return true;
+
+    if (idx != (size_t)-1) {  // hit
+      //??? blk_offset = vector<>.find(idx)
+//      fprintf(stdout, "DEBUG i0j5xn ot bitsReader MayMatch(%s): %ld,\n",
+//              key.ToString().c_str(), idx);
+      return true;
+    } else {
+      return false;
+    }
+  }
+
+  virtual void MayMatch(int num_keys, Slice** keys, bool* may_match) override {
+    fprintf(stdout, "DEBUG w3xm82 in OtBitsReader::MayMatch(num_keys)\n");
+    for (int i = 0; i < num_keys; ++i) {
+      may_match[i] = MayMatch(*keys[i]);
+    }
+  }
+
+  //wp
+  void RecoverFromCharArray(std::vector<uint16_t>& v1,
+                            std::vector<uint16_t>& v2,
+                            std::vector<uint8_t>& v3,
+                            std::vector<uint8_t>& v4,
+                            std::vector<uint64_t>& v5,
+                            uint64_t& num,
+                            char& tmp_new_impl,
+                            char& tmp_sub_impl,
+                            char& tmp_fake_num_probes,
+                            const char* & buf) {
+    uint32_t size1 = 0, size2 = 0, size3 = 0, size4 = 0, size5 = 0;
+
+    uint32_t *p = (uint32_t *) buf;
+    size1 = *p;
+    uint16_t *p1 = (uint16_t *) (buf + 4);
+    v1.resize(size1);
+    for (uint64_t i = 0; i < size1; i++) {
+      v1[i] = *p1;
+      p1++;
+    }
+
+    p = (uint32_t *) (buf + 4 + size1 * 2);
+    size2 = *p;
+    p1 = (uint16_t *) (buf + 4 + size1 * 2 + 4);
+    v2.resize(size2);
+    for (uint64_t i = 0; i < size2; i++) {
+      v2[i] = *p1;
+      p1++;
+    }
+
+    p = (uint32_t *) (buf + 4 + size1 * 2 + 4 + size2 * 2);
+    size3 = *p;
+    uint8_t *p2 = (uint8_t *) (buf + 4 + size1 * 2 + 4 + size2 * 2 + 4);
+    v3.resize(size3);
+    for (uint64_t i = 0; i < size3; i++) {
+      v3[i] = *p2;
+      p2++;
+    }
+
+    p = (uint32_t *) (buf + 4 + size1 * 2 + 4 + size2 * 2 + 4 + size3);
+    size4 = *p;
+    p2 = (uint8_t *) (buf + 4 + size1 * 2 + 4 + size2 * 2 + 4 + size3 + 4);
+    v4.resize(size4);
+    for (uint64_t i = 0; i < size4; i++) {
+      v4[i] = *p2;
+      p2++;
+    }
+
+    p = (uint32_t *) (buf + 4 + size1 * 2 + 4 + size2 * 2 + 4 + size3 + 4 + size4);
+    size5 = *p;
+    uint64_t *p4 = (uint64_t *) (buf + 4 + size1 * 2 + 4 + size2 * 2 + 4 + size3 + 4 + size4 + 4);
+    v5.resize(size5);
+    for (uint64_t i = 0; i < size5; i++) {
+      v5[i] = *p4;
+      p4++;
+    }
+
+    uint64_t *p3 = (uint64_t *) (buf + 4 + size1 * 2 + 4 + size2 * 2 + 4 + size3 + 4 + size4 + 4 + size5 * 8);
+    num = *p3;
+//    fprintf(stderr, "DEBUG m72qa4 RecoverFromCharArray num: %lu\n", num);
+
+    //xp, be compatible with full filter
+    char* pc1 = (char*) (buf + 4 + size1 * 2 + 4 + size2 * 2 + 4 + size3 + 4 + size4 + 4 + size5 * 8 + 8);
+    tmp_new_impl = *pc1;
+    char* pc2 = (char*) (buf + 4 + size1 * 2 + 4 + size2 * 2 + 4 + size3 + 4 + size4 + 4 + size5 * 8 + 8+1);
+    tmp_sub_impl = *pc2;
+    char* pc3 = (char*) (buf + 4 + size1 * 2 + 4 + size2 * 2 + 4 + size3 + 4 + size4 + 4 + size5 * 8 + 8+1+1);
+    tmp_fake_num_probes = *pc3;
+    char* pc4 = (char*) (buf + 4 + size1 * 2 + 4 + size2 * 2 + 4 + size3 + 4 + size4 + 4 + size5 * 8 + 8+1+1+1);
+    tmp_fake_num_probes = *pc4;
+    char* pc5 = (char*) (buf + 4 + size1 * 2 + 4 + size2 * 2 + 4 + size3 + 4 + size4 + 4 + size5 * 8 + 8+1+1+1+1);
+    tmp_fake_num_probes = *pc5;
+  }
+
+  // be compatible with full filter in GetBloomBitsReader
+  char new_impl;
+  char sub_impl;
+  char fake_num_probes;
+  // a ot lex pdt
+  rocksdb::succinct::tries::path_decomposed_trie<
+      rocksdb::succinct::tries::vbyte_string_pool, true>
+      ot_pdt;
+  // a vector<> stores blk boundary keys
+  //TODO
+};
+
 
 // See description in FastLocalBloomImpl
 class FastLocalBloomBitsBuilder : public BuiltinFilterBitsBuilder {
@@ -406,6 +853,7 @@ const std::vector<BloomFilterPolicy::Mode> BloomFilterPolicy::kAllFixedImpls = {
     kLegacyBloom,
     kDeprecatedBlock,
     kFastLocalBloom,
+    kOtLexPdt,
 };
 
 const std::vector<BloomFilterPolicy::Mode> BloomFilterPolicy::kAllUserModes = {
@@ -436,6 +884,9 @@ BloomFilterPolicy::BloomFilterPolicy(double bits_per_key, Mode mode)
 BloomFilterPolicy::~BloomFilterPolicy() {}
 
 const char* BloomFilterPolicy::Name() const {
+  if (mode_ == kOtLexPdt) {
+    return "rocksdb.OtLexPdtFilter";
+  }
   return "rocksdb.BuiltinBloomFilter";
 }
 
@@ -515,15 +966,28 @@ FilterBitsBuilder* BloomFilterPolicy::GetBuilderWithContext(
         if (context.table_options.format_version < 5) {
           cur = kLegacyBloom;
         } else {
-          cur = kFastLocalBloom;
+          if (context.table_options.use_pdt) { //xp
+            cur = kOtLexPdt;
+          }
+          else {
+            cur = kFastLocalBloom;
+          }
         }
+        //        fprintf(stdout, "in GetBuilderWithContext(), mode: %d,
+        //        format_version: %d\n",
+        //                cur, context.table_options.format_version); //xp
         break;
       case kDeprecatedBlock:
         return nullptr;
       case kFastLocalBloom:
+//        fprintf(stderr, "new FastLocalBloomBitsBuilder()\n");
         return new FastLocalBloomBitsBuilder(millibits_per_key_);
       case kLegacyBloom:
+//        fprintf(stderr, "new LegacyBloomBitsBuilder()\n");
         return new LegacyBloomBitsBuilder(whole_bits_per_key_);
+      case kOtLexPdt:  // xp
+//        fprintf(stderr, "new OtLexPdtBitsBuilder()\n");
+        return new OtLexPdtBloomBitsBuilder();
     }
   }
   assert(false);
@@ -665,6 +1129,14 @@ FilterBitsReader* BloomFilterPolicy::GetBloomBitsReader(
     return new AlwaysTrueFilter();
   }
 
+  if(80 == sub_impl_val) {
+//    if(mode_ != kOtLexPdt) {
+//      fprintf(stderr, "WARNING &7vzh GetBloomBitsReader sub_impl_val 5 but mode_ %d NOT kOT\n", mode_);
+//    }
+//    fprintf(stderr, "DEBUG a8uq9 GetBloomBitsReader use Ot, mode_ %d\n", mode_);
+    return new OtLexPdtBloomBitsReader(contents.data());
+  }
+
   if (sub_impl_val == 0) {        // FastLocalBloom
     if (log2_block_bytes == 6) {  // Only block size supported for now
       return new FastLocalBloomBitsReader(contents.data(), num_probes, len);
@@ -678,15 +1150,33 @@ FilterBitsReader* BloomFilterPolicy::GetBloomBitsReader(
 const FilterPolicy* NewBloomFilterPolicy(double bits_per_key,
                                          bool use_block_based_builder) {
   BloomFilterPolicy::Mode m;
+  if(-1 == bits_per_key) { //xp
+    m = BloomFilterPolicy::kOtLexPdt;
+    return new BloomFilterPolicy(0, m);
+  }
   if (use_block_based_builder) {
     m = BloomFilterPolicy::kDeprecatedBlock;
   } else {
     m = BloomFilterPolicy::kAuto;
   }
+  //  fprintf(stdout, "filter mode: %d\n", m);//xp
   assert(std::find(BloomFilterPolicy::kAllUserModes.begin(),
                    BloomFilterPolicy::kAllUserModes.end(),
                    m) != BloomFilterPolicy::kAllUserModes.end());
   return new BloomFilterPolicy(bits_per_key, m);
+}
+
+// xp
+// actively init Mode with kOtLexPdt
+const FilterPolicy* NewOtLexPdtFilterPolicy() {
+  BloomFilterPolicy::Mode m;
+  m = BloomFilterPolicy::kOtLexPdt;
+  //  if (use_block_based_builder) {
+  //    m = BloomFilterPolicy::kDeprecatedBlock;
+  //  } else {
+  //    m = BloomFilterPolicy::kAuto;
+  //  }
+  return new BloomFilterPolicy(0, m);
 }
 
 FilterBuildingContext::FilterBuildingContext(

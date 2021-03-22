@@ -78,6 +78,7 @@ class FullFilterBlockBuilder : public FilterBlockBuilder {
 
 };
 
+
 // A FilterBlockReader is used to parse filter from SST table.
 // KeyMayMatch and PrefixMayMatch would trigger filter checking
 class FullFilterBlockReader
@@ -132,6 +133,105 @@ class FullFilterBlockReader
                           const Comparator* comparator) const;
 
  private:
+  bool full_length_enabled_;
+  size_t prefix_extractor_full_length_;
+};
+
+
+
+class OtLexPdtFilterBlockBuilder : public FilterBlockBuilder {
+ public:
+  explicit OtLexPdtFilterBlockBuilder(
+      FilterBitsBuilder* filter_bits_builder)
+      :num_added_(0) {
+    filter_bits_builder_.reset(filter_bits_builder);
+  }
+
+  // No copying allowed
+  OtLexPdtFilterBlockBuilder(const OtLexPdtFilterBlockBuilder&) = delete;
+  void operator=(const OtLexPdtFilterBlockBuilder&) = delete;
+
+  // bits_builder is created in filter_policy, it should be passed in here
+  // directly. and be deleted here
+  ~OtLexPdtFilterBlockBuilder() {}
+
+  virtual const char* Name() const { return "otlexpdtfilter."; }
+  virtual bool IsBlockBased() override { return false; }
+  virtual void StartBlock(uint64_t /*block_offset*/) override {}
+  virtual void Add(const Slice& key) override;
+  virtual size_t NumAdded() const override { return num_added_; }
+  virtual Slice Finish(const BlockHandle& tmp, Status* status) override;
+  using FilterBlockBuilder::Finish;
+
+// protected:
+  virtual void AddKey(const Slice& key);
+  std::unique_ptr<FilterBitsBuilder> filter_bits_builder_;
+
+// private:
+  // important: all of these might point to invalid addresses
+  // at the time of destruction of this filter block. destructor
+  // should NOT dereference them.
+  uint32_t num_added_;
+  std::unique_ptr<const char[]> filter_data_;
+  //TODO vector for all boundary keys in this Table
+};
+
+// A FilterBlockReader is used to parse filter from SST table.
+// KeyMayMatch and PrefixMayMatch would trigger filter checking
+class OtLexPdtFilterBlockReader
+    : public FilterBlockReaderCommon<ParsedFullFilterBlock> {
+ public:
+  OtLexPdtFilterBlockReader(const BlockBasedTable* t,
+                        CachableEntry<ParsedFullFilterBlock>&& filter_block);
+
+  static std::unique_ptr<FilterBlockReader> Create(
+      const BlockBasedTable* table, FilePrefetchBuffer* prefetch_buffer,
+      bool use_cache, bool prefetch, bool pin,
+      BlockCacheLookupContext* lookup_context);
+
+  bool IsBlockBased() override { return false; }
+
+  bool KeyMayMatch(const Slice& key, const SliceTransform* prefix_extractor,
+                   uint64_t block_offset, const bool no_io,
+                   const Slice* const const_ikey_ptr, GetContext* get_context,
+                   BlockCacheLookupContext* lookup_context) override;
+
+  //TODO
+  void KeysMayMatch(MultiGetRange* range,
+                    const SliceTransform* prefix_extractor,
+                    uint64_t block_offset, const bool no_io,
+                    BlockCacheLookupContext* lookup_context) override;
+
+
+  bool PrefixMayMatch(const Slice& prefix,
+                      const SliceTransform* prefix_extractor,
+                      uint64_t block_offset, const bool no_io,
+                      const Slice* const const_ikey_ptr,
+                      GetContext* get_context,
+                      BlockCacheLookupContext* lookup_context) override;
+
+  size_t ApproximateMemoryUsage() const override;
+
+  //TODO
+  bool RangeMayExist(const Slice* iterate_upper_bound, const Slice& user_key,
+                     const SliceTransform* prefix_extractor,
+                     const Comparator* comparator,
+                     const Slice* const const_ikey_ptr, bool* filter_checked,
+                     bool need_upper_bound_check,
+                     BlockCacheLookupContext* lookup_context) override;
+
+// private:
+  bool MayMatch(const Slice& entry, bool no_io, GetContext* get_context,
+                BlockCacheLookupContext* lookup_context) const;
+  //TODO
+  void MayMatch(MultiGetRange* range, bool no_io,
+                const SliceTransform* prefix_extractor,
+                BlockCacheLookupContext* lookup_context) const;
+
+  bool IsFilterCompatible(const Slice* iterate_upper_bound, const Slice& prefix,
+                          const Comparator* comparator) const;
+
+// private:
   bool full_length_enabled_;
   size_t prefix_extractor_full_length_;
 };

@@ -58,6 +58,8 @@ class BloomFilterPolicy : public FilterPolicy {
     // FastLocalBloomImpl.
     // NOTE: TESTING ONLY as this mode does not check format_version
     kFastLocalBloom = 2,
+
+    kOtLexPdt = 5,
     // Automatically choose from the above (except kDeprecatedBlock) based on
     // context at build time, including compatibility with format_version.
     // NOTE: This is currently the only recommended mode that is user exposed.

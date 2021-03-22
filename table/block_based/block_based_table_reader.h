@@ -76,6 +76,7 @@ typedef std::vector<std::pair<std::string, std::string>> KVPairBlock;
 class BlockBasedTable : public TableReader {
  public:
   static const std::string kFilterBlockPrefix;
+  static const std::string kOtLexPdtFilterBlockPrefix; //xp
   static const std::string kFullFilterBlockPrefix;
   static const std::string kPartitionedFilterBlockPrefix;
   // The longest prefix of the cache key used to identify blocks.
@@ -531,6 +532,7 @@ struct BlockBasedTable::Rep {
 
   enum class FilterType {
     kNoFilter,
+    kOtLexPdtFilter, //xp
     kFullFilter,
     kBlockFilter,
     kPartitionedFilter,

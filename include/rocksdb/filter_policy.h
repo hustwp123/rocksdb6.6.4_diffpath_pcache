@@ -193,4 +193,9 @@ class FilterPolicy {
 // trailing spaces in keys.
 extern const FilterPolicy* NewBloomFilterPolicy(
     double bits_per_key, bool use_block_based_builder = false);
+
+// pdt
+extern const FilterPolicy* NewLexPdtFilterPolicy(bool use_block_based_builer = false);
+
+extern const FilterPolicy* NewCentriodPdtFilterPolicy(bool use_block_based_builder = false);
 }  // namespace rocksdb

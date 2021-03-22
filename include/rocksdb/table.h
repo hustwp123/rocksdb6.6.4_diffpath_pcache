@@ -223,6 +223,9 @@ struct BlockBasedTableOptions {
   // algorithms.
   bool verify_compression = false;
 
+  //wp
+  bool use_pdt = false;
+
   // If used, For every data block we load into memory, we will create a bitmap
   // of size ((block_size / `read_amp_bytes_per_bit`) / 8) bytes. This bitmap
   // will be used to figure out the percentage we actually read of the blocks.
