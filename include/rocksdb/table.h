@@ -224,7 +224,7 @@ struct BlockBasedTableOptions {
   bool verify_compression = false;
 
   //wp
-  bool use_pdt = false;
+  bool use_pdt = true;
 
   // If used, For every data block we load into memory, we will create a bitmap
   // of size ((block_size / `read_amp_bytes_per_bit`) / 8) bytes. This bitmap
@@ -275,7 +275,7 @@ struct BlockBasedTableOptions {
   // 5 -- Can be read by RocksDB's versions since 6.6.0. Full and partitioned
   // filters use a generally faster and more accurate Bloom filter
   // implementation, with a different schema.
-  uint32_t format_version = 2;
+  uint32_t format_version = 5;
 
   // Store index blocks on disk in compressed format. Changing this option to
   // false  will avoid the overhead of decompression if index blocks are evicted

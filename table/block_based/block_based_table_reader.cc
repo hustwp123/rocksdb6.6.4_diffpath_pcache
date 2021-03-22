@@ -1540,6 +1540,8 @@ Status BlockBasedTable::PrefetchIndexAndFilterBlocks(
 
   const bool use_cache = table_options.cache_index_and_filter_blocks;
 
+  fprintf(stderr,"use_cache=%d\n",use_cache);
+
   // pin both index and filters, down to all partitions
   const bool pin_all =
       rep_->table_options.pin_l0_filter_and_index_blocks_in_cache && level == 0;
@@ -1582,6 +1584,10 @@ Status BlockBasedTable::PrefetchIndexAndFilterBlocks(
   const bool pin_filter =
       pin_all || (table_options.pin_top_level_index_and_filter &&
                   rep_->filter_type == Rep::FilterType::kPartitionedFilter);
+  if(!pin_filter)
+  {
+    fprintf(stderr,"pin_all=%d\n",pin_all);
+  }
 
   if (rep_->filter_policy) {
     auto filter = new_table->CreateFilterBlockReader(
@@ -1911,7 +1917,7 @@ std::unique_ptr<FilterBlockReader> BlockBasedTable::CreateFilterBlockReader(
           this, prefetch_buffer, use_cache, prefetch, pin, lookup_context);
 
     case Rep::FilterType::kOtLexPdtFilter:  // xp
-            fprintf(stderr, "DEBUG kzo3i kOt in CreateFilterBlockReader\n");
+           // fprintf(stderr, "DEBUG kzo3i kOt in CreateFilterBlockReader\n");
       return OtLexPdtFilterBlockReader::Create(this, prefetch_buffer, use_cache,
                                                prefetch, pin, lookup_context);
 

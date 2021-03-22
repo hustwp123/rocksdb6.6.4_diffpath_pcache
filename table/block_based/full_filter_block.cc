@@ -400,7 +400,7 @@ std::unique_ptr<FilterBlockReader> OtLexPdtFilterBlockReader::Create(
 
   CachableEntry<ParsedFullFilterBlock> filter_block;
   if (prefetch || !use_cache) {
-    fprintf(stderr, "DEBUG 9d533h in OtLexPdtFiltBlockReader::Create()\n");
+    //fprintf(stderr, "DEBUG 9d533h in OtLexPdtFiltBlockReader::Create()\n");
     const Status s = ReadFilterBlock(table, prefetch_buffer, ReadOptions(),
                                      use_cache, nullptr /* get_context */,
                                      lookup_context, &filter_block);
@@ -409,6 +409,8 @@ std::unique_ptr<FilterBlockReader> OtLexPdtFilterBlockReader::Create(
     }
 
     if (use_cache && !pin) {
+      fprintf(stderr,"use_cache=%d  pin=%d\n",use_cache,pin);
+      fprintf(stderr,"filter_block   reset\n");
       filter_block.Reset();
     }
   }

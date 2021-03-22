@@ -93,7 +93,7 @@ FilterBlockBuilder* CreateFilterBlockBuilder(
     } else {
       if(table_opt.use_pdt)
       {
-        fprintf(stderr, "DEBUG 9qhgb using OtLexPdtFilterBlockBuilder\n"); //xp
+        //fprintf(stderr, "DEBUG 9qhgb using OtLexPdtFilterBlockBuilder\n"); //xp
         return new OtLexPdtFilterBlockBuilder(filter_bits_builder);
       }
       else

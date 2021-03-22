@@ -37,7 +37,7 @@ class OtLexPdtBloomBitsBuilder : public BuiltinFilterBitsBuilder {
  public:
   explicit OtLexPdtBloomBitsBuilder()
       :ot_pdt() {
-    fprintf(stderr, "constructing OtLexPdtBloomBitsBuilder()\n");
+    //fprintf(stderr, "constructing OtLexPdtBloomBitsBuilder()\n");
   }
 
   // No Copy allowed
@@ -66,12 +66,12 @@ class OtLexPdtBloomBitsBuilder : public BuiltinFilterBitsBuilder {
 
 //    fprintf(stdout, "DEBUG w7zvbg key_strings_.size: %lu\n", key_strings_.size());
 
-    auto chrono_start = std::chrono::system_clock::now();
+    // auto chrono_start = std::chrono::system_clock::now();
     ot_pdt.construct_compacted_trie(key_strings_, false); // ot_pdt.pub_ are inited
-    auto chrono_end = std::chrono::system_clock::now();
-    std::chrono::microseconds elapsed_us = std::chrono::duration_cast<std::chrono::microseconds>(chrono_end-chrono_start);
-    std::cout << "DEBUG 3yb6fo Finis() ot_pdt use " << key_strings_.size() << " keys build raw trie takes(us) " <<
-              elapsed_us.count() << std::endl;
+    // auto chrono_end = std::chrono::system_clock::now();
+    // std::chrono::microseconds elapsed_us = std::chrono::duration_cast<std::chrono::microseconds>(chrono_end-chrono_start);
+    // std::cout << "DEBUG 3yb6fo Finis() ot_pdt use " << key_strings_.size() << " keys build raw trie takes(us) " <<
+              // elapsed_us.count() << std::endl;
 
     // get the byte size of key_strings_
     uint64_t ot_lex_pdt_byte_size = CalculateByteSpace();
@@ -241,7 +241,7 @@ class OtLexPdtBloomBitsBuilder : public BuiltinFilterBitsBuilder {
     p = (uint32_t*)(buf + 4 + v1.size() * 2 + 4 + v2.size() * 2 + 4 +
                     v3.size() + 4 + v4.size());
     *p = v5.size();
-//    fprintf(stderr, "DEBUG h8qd8z PutIntoCharArray m_bits.size(): %u\n", *p);
+    fprintf(stderr, "DEBUG h8qd8z PutIntoCharArray m_bits.size(): %u\n", *p);
     uint64_t* p4 = (uint64_t*)(buf + 4 + v1.size() * 2 + 4 + v2.size() * 2 + 4 +
                                v3.size() + 4 + v4.size() + 4);
     for (uint32_t i = 0; i < v5.size(); i++) {
@@ -307,13 +307,13 @@ class OtLexPdtBloomBitsReader : public FilterBitsReader {
                          sub_impl,
                          fake_num_probes,
                          buf);
-//    fprintf(stdout, "DEBUG uq7zbt in otReader sizes for string,label,branch,char,bit,size:%ld,%ld,%ld,%ld,%ld,%ld\n",
-//            ot_pdt.pub_m_centroid_path_string.size(),
-//            ot_pdt.pub_m_labels.size(),
-//            ot_pdt.pub_m_centroid_path_branches.size(),
-//            ot_pdt.pub_m_branching_chars.size(),
-//            ot_pdt.pub_m_bp_m_bits.size(),
-//            ot_pdt.pub_m_bp_m_size);
+   fprintf(stdout, "DEBUG uq7zbt in otReader sizes for string,label,branch,char,bit,size:%ld,%ld,%ld,%ld,%ld,%ld\n",
+           ot_pdt.pub_m_centroid_path_string.size(),
+           ot_pdt.pub_m_labels.size(),
+           ot_pdt.pub_m_centroid_path_branches.size(),
+           ot_pdt.pub_m_branching_chars.size(),
+           ot_pdt.pub_m_bp_m_bits.size(),
+           ot_pdt.pub_m_bp_m_size);
 
     //    for (size_t i = 0; i < ot_pdt.pub_m_centroid_path_string.size(); i++) {
 //      fprintf(stdout, "Rstring:%ld,%d\n", i, ot_pdt.pub_m_centroid_path_string[i]);
@@ -980,13 +980,13 @@ FilterBitsBuilder* BloomFilterPolicy::GetBuilderWithContext(
       case kDeprecatedBlock:
         return nullptr;
       case kFastLocalBloom:
-//        fprintf(stderr, "new FastLocalBloomBitsBuilder()\n");
+        //fprintf(stderr, "new FastLocalBloomBitsBuilder()\n");
         return new FastLocalBloomBitsBuilder(millibits_per_key_);
       case kLegacyBloom:
-//        fprintf(stderr, "new LegacyBloomBitsBuilder()\n");
+        //fprintf(stderr, "new LegacyBloomBitsBuilder()\n");
         return new LegacyBloomBitsBuilder(whole_bits_per_key_);
       case kOtLexPdt:  // xp
-//        fprintf(stderr, "new OtLexPdtBitsBuilder()\n");
+        //fprintf(stderr, "new OtLexPdtBitsBuilder()\n");
         return new OtLexPdtBloomBitsBuilder();
     }
   }
@@ -1133,7 +1133,7 @@ FilterBitsReader* BloomFilterPolicy::GetBloomBitsReader(
 //    if(mode_ != kOtLexPdt) {
 //      fprintf(stderr, "WARNING &7vzh GetBloomBitsReader sub_impl_val 5 but mode_ %d NOT kOT\n", mode_);
 //    }
-//    fprintf(stderr, "DEBUG a8uq9 GetBloomBitsReader use Ot, mode_ %d\n", mode_);
+    //fprintf(stderr, "DEBUG a8uq9 GetBloomBitsReader use Ot, mode_ %d\n", mode_);
     return new OtLexPdtBloomBitsReader(contents.data());
   }
 
