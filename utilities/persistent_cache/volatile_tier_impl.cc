@@ -39,7 +39,7 @@ PersistentCache::StatsType VolatileCacheTier::Stats() {
 }
 
 Status VolatileCacheTier::Insert(const Slice& page_key, const char* data,
-                                 const size_t size) {
+                                 const size_t size, std::string ) {
   // precondition
   assert(data);
   assert(size);
@@ -81,7 +81,7 @@ Status VolatileCacheTier::Insert(const Slice& page_key, const char* data,
 
 Status VolatileCacheTier::Lookup(const Slice& page_key,
                                  std::unique_ptr<char[]>* result,
-                                 size_t* size) {
+                                 size_t* size, std::string fname) {
   CacheData key(std::move(page_key.ToString()));
   CacheData* kv;
   bool ok = index_.Find(&key, &kv);
@@ -100,7 +100,7 @@ Status VolatileCacheTier::Lookup(const Slice& page_key,
   stats_.cache_misses_++;
 
   if (next_tier()) {
-    return next_tier()->Lookup(page_key, result, size);
+    return next_tier()->Lookup(page_key, result, size,fname);
   }
 
   return Status::NotFound("key not found in volatile cache");

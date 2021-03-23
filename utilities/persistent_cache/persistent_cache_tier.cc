@@ -134,16 +134,16 @@ std::string PersistentTieredCache::PrintStats() {
 }
 
 Status PersistentTieredCache::Insert(const Slice& page_key, const char* data,
-                                     const size_t size) {
+                                     const size_t size, std::string fname) {
   assert(!tiers_.empty());
-  return tiers_.front()->Insert(page_key, data, size);
+  return tiers_.front()->Insert(page_key, data, size,fname);
 }
 
 Status PersistentTieredCache::Lookup(const Slice& page_key,
                                      std::unique_ptr<char[]>* data,
-                                     size_t* size) {
+                                     size_t* size, std::string fname) {
   assert(!tiers_.empty());
-  return tiers_.front()->Lookup(page_key, data, size);
+  return tiers_.front()->Lookup(page_key, data, size,fname);
 }
 
 void PersistentTieredCache::AddTier(const Tier& tier) {
