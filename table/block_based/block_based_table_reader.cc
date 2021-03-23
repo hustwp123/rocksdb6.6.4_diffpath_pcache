@@ -1540,7 +1540,6 @@ Status BlockBasedTable::PrefetchIndexAndFilterBlocks(
 
   const bool use_cache = table_options.cache_index_and_filter_blocks;
 
-  fprintf(stderr,"use_cache=%d\n",use_cache);
 
   // pin both index and filters, down to all partitions
   const bool pin_all =
@@ -1584,10 +1583,6 @@ Status BlockBasedTable::PrefetchIndexAndFilterBlocks(
   const bool pin_filter =
       pin_all || (table_options.pin_top_level_index_and_filter &&
                   rep_->filter_type == Rep::FilterType::kPartitionedFilter);
-  if(!pin_filter)
-  {
-    fprintf(stderr,"pin_all=%d\n",pin_all);
-  }
 
   if (rep_->filter_policy) {
     auto filter = new_table->CreateFilterBlockReader(

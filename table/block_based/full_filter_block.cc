@@ -409,8 +409,6 @@ std::unique_ptr<FilterBlockReader> OtLexPdtFilterBlockReader::Create(
     }
 
     if (use_cache && !pin) {
-      fprintf(stderr,"use_cache=%d  pin=%d\n",use_cache,pin);
-      fprintf(stderr,"filter_block   reset\n");
       filter_block.Reset();
     }
   }

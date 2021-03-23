@@ -241,7 +241,7 @@ class OtLexPdtBloomBitsBuilder : public BuiltinFilterBitsBuilder {
     p = (uint32_t*)(buf + 4 + v1.size() * 2 + 4 + v2.size() * 2 + 4 +
                     v3.size() + 4 + v4.size());
     *p = v5.size();
-    fprintf(stderr, "DEBUG h8qd8z PutIntoCharArray m_bits.size(): %u\n", *p);
+//fprintf(stderr, "DEBUG h8qd8z PutIntoCharArray m_bits.size(): %u\n", *p);
     uint64_t* p4 = (uint64_t*)(buf + 4 + v1.size() * 2 + 4 + v2.size() * 2 + 4 +
                                v3.size() + 4 + v4.size() + 4);
     for (uint32_t i = 0; i < v5.size(); i++) {
@@ -307,13 +307,13 @@ class OtLexPdtBloomBitsReader : public FilterBitsReader {
                          sub_impl,
                          fake_num_probes,
                          buf);
-   fprintf(stdout, "DEBUG uq7zbt in otReader sizes for string,label,branch,char,bit,size:%ld,%ld,%ld,%ld,%ld,%ld\n",
-           ot_pdt.pub_m_centroid_path_string.size(),
-           ot_pdt.pub_m_labels.size(),
-           ot_pdt.pub_m_centroid_path_branches.size(),
-           ot_pdt.pub_m_branching_chars.size(),
-           ot_pdt.pub_m_bp_m_bits.size(),
-           ot_pdt.pub_m_bp_m_size);
+  //  fprintf(stdout, "DEBUG uq7zbt in otReader sizes for string,label,branch,char,bit,size:%ld,%ld,%ld,%ld,%ld,%ld\n",
+  //          ot_pdt.pub_m_centroid_path_string.size(),
+  //          ot_pdt.pub_m_labels.size(),
+  //          ot_pdt.pub_m_centroid_path_branches.size(),
+  //          ot_pdt.pub_m_branching_chars.size(),
+  //          ot_pdt.pub_m_bp_m_bits.size(),
+  //          ot_pdt.pub_m_bp_m_size);
 
     //    for (size_t i = 0; i < ot_pdt.pub_m_centroid_path_string.size(); i++) {
 //      fprintf(stdout, "Rstring:%ld,%d\n", i, ot_pdt.pub_m_centroid_path_string[i]);
@@ -377,7 +377,7 @@ class OtLexPdtBloomBitsReader : public FilterBitsReader {
   }
 
   virtual void MayMatch(int num_keys, Slice** keys, bool* may_match) override {
-    fprintf(stdout, "DEBUG w3xm82 in OtBitsReader::MayMatch(num_keys)\n");
+   // fprintf(stdout, "DEBUG w3xm82 in OtBitsReader::MayMatch(num_keys)\n");
     for (int i = 0; i < num_keys; ++i) {
       may_match[i] = MayMatch(*keys[i]);
     }
