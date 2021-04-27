@@ -431,151 +431,70 @@ Status SST_space::Get(const std::string key, std::unique_ptr<char[]>* data,
   DLinkedNode* node = cache[key];
   moveToHead(node);
   data->reset(new char[node->value.size]);
+  if(node->value.size>SPACE_SIZE)
+  {
+    fprintf(stderr,"get size=%ld\n",node->value.size);
+  }
+  
+  if(node->value.offset.size()>1)
+  {
+    fprintf(stderr,"get num>1\n");
+  }
   *size = node->value.size;
   size_t cur = 0;
   for (uint32_t i = 0; i < (node->value.offset.size() - 1); i++) {
     ssize_t t =
         pread(fd, data->get() + cur, SPACE_SIZE, begin + node->value.offset[i]);
-    if (t < 0) {
+    if (t != SPACE_SIZE) {
       return Status::IOError();
     }
     cur += SPACE_SIZE;
   }
-  int left_size = node->value.size % SPACE_SIZE == 0
+  ssize_t left_size = node->value.size % SPACE_SIZE == 0
                       ? SPACE_SIZE
                       : node->value.size % SPACE_SIZE;
   int index = node->value.offset.size() - 1;
   ssize_t t = pread(fd, data->get() + cur, left_size,
                     begin + node->value.offset[index]);
-  if (t < 0) {
+  if (t != left_size) {
     return Status::IOError();
   }
   return Status::OK();
 }
-std::string SST_space::Get(std::string key) {
-  MutexLock _(&lock);
-  if (!cache.count(key)) {
-    return "";
-  }
-  DLinkedNode* node = cache[key];
-  moveToHead(node);
-  char* s = new char[node->value.size + 1];
-  size_t cur = 0;
-  for (uint32_t i = 0; i < (node->value.offset.size() - 1); i++) {
-    ssize_t t = pread(fd, s + cur, SPACE_SIZE, begin + node->value.offset[i]);
-    if (t < 0) {
-      return "";
-    }
 
-    cur += SPACE_SIZE;
-  }
-  int left_size = node->value.size % SPACE_SIZE == 0
-                      ? SPACE_SIZE
-                      : node->value.size % SPACE_SIZE;
-  int index = node->value.offset.size() - 1;
-  ssize_t t = pread(fd, s + cur, left_size, begin + node->value.offset[index]);
-  if (t < 0) {
-    return "";
-  }
-  s[node->value.size] = '\0';
-  std::string re = std::string(s, node->value.size);
-  delete[] s;
-  return re;
-}
-
-Status SST_space::Put(const std::string key, const char* data,
-                      const size_t size) {
-  MutexLock _(&lock);
-  if (size == 0) {
-    return Status::OK();
-  }
-  uint32_t need_num = size / SPACE_SIZE;
-  need_num += size % SPACE_SIZE == 0 ? 0 : 1;
-  if (need_num > all_num) {
-    return Status::OK();
-  }
-
-  DLinkedNode* node;
-  if (!cache.count(key))  // key不存在 创建新节点
-  {
-    node = new DLinkedNode();
-    node->key = key;
-    node->value.offset.clear();
-    cache[key] = node;
-    addToHead(node);
-    while (need_num > empty_num) {
-      DLinkedNode* removed = removeTail();
-      cache.erase(removed->key);
-      removeRecord(&(removed->value));
-      delete removed;
-    }
-  } else {
-    node = cache[key];
-    moveToHead(node);
-    removeRecord(&(node->value));
-    while (need_num > empty_num) {
-      DLinkedNode* removed = removeTail();
-      cache.erase(removed->key);
-      removeRecord(&(removed->value));
-      delete removed;
-    }
-  }
-  //取块
-  uint32_t num = 0, j = 0;
-  while (j < bit_map.size()) {
-    if (!bit_map[j]) {
-      bit_map[j] = 1;
-      node->value.offset.push_back(j * SPACE_SIZE);
-      num++;
-      if (num == need_num) {
-        break;
-      }
-    }
-    j++;
-  }
-  //写块
-  size_t cur = 0;
-  for (uint32_t i = 0; i < node->value.offset.size() - 1; i++) {
-    ssize_t t =
-        pwrite(fd, data + cur, SPACE_SIZE, begin + node->value.offset[i]);
-    if (t < 0) {
-      return Status::IOError();
-    }
-    cur += SPACE_SIZE;
-  }
-  node->value.size = size;
-  size_t left_size = size % SPACE_SIZE == 0 ? SPACE_SIZE : size % SPACE_SIZE;
-  int index = node->value.offset.size() - 1;
-
-  ssize_t t =
-      pwrite(fd, data + cur, left_size, begin + node->value.offset[index]);
-  if (t < 0) {
-    return Status::IOError();
-  }
-
-  empty_num -= need_num;
-  return Status::OK();
-}
 void SST_space::Put(const std::string& key, const std::string& value,
-                    uint64_t& out,int ) {
+                    uint64_t& out, bool is_meta) {
   MutexLock _(&lock);
   if (value.size() == 0) {
     return;
   }
   uint32_t need_num = value.size() / SPACE_SIZE;
   need_num += value.size() % SPACE_SIZE == 0 ? 0 : 1;
-  if (need_num > all_num) {
+  if (need_num > all_num)// || need_num > 1) 
+  {
     return;
   }
+  // if(need_num>1)
+  // {
+  //   fprintf(stderr,"Put need_num>1\n ");
+  // }
   DLinkedNode* node;
   if (!cache.count(key))  // key不存在 创建新节点
   {
     node = new DLinkedNode();
     node->key = key;
     node->value.offset.clear();
+    node->out = is_meta ? 1 : 0;
     cache[key] = node;
     addToHead(node);
     while (need_num > empty_num) {
+      DLinkedNode* tail_ = getTail();
+      if (tail_->out) {
+        tail_->out--;
+        moveToHead(tail_);
+        continue;
+      }
+      //fprintf(stderr,"out\n");
       out++;
       DLinkedNode* removed = removeTail();
       cache.erase(removed->key);
@@ -584,9 +503,17 @@ void SST_space::Put(const std::string& key, const std::string& value,
     }
   } else {
     node = cache[key];
+    node->out = is_meta ? 1 : 0;
     moveToHead(node);
     removeRecord(&(node->value));
     while (need_num > empty_num) {
+      DLinkedNode* tail_ = getTail();
+      if (tail_->out) {
+        tail_->out--;
+        moveToHead(tail_);
+        continue;
+      }
+      //fprintf(stderr,"out\n");
       out++;
       DLinkedNode* removed = removeTail();
       cache.erase(removed->key);
@@ -594,60 +521,96 @@ void SST_space::Put(const std::string& key, const std::string& value,
       delete removed;
     }
   }
-  //取块
-  uint32_t num = 0, j = 0;
-  while (j < bit_map.size()) {
-    if (!bit_map[j]) {
-      bit_map[j] = 1;
-      node->value.offset.push_back(j * SPACE_SIZE);
-      num++;
-      if (num == need_num) {
-        break;
-      }
+  node->value.size = value.size();
+  empty_num -= need_num;
+
+  if (empty_nodes.size() >= need_num) {
+    //fprintf(stderr,"get from empty_nodes need_num=%d empty_nodes.size()=%ld\n",need_num,empty_nodes.size());
+    for (uint32_t i = 0; i < empty_nodes.size() && i < need_num; i++) {
+      node->value.offset.push_back(empty_nodes[i] * SPACE_SIZE);
+      bit_map[empty_nodes[i]]=1;
     }
-    j++;
+    empty_nodes.clear();
+  } else {
+    
+    for (uint32_t i = 0; i < empty_nodes.size() && i < need_num; i++) {
+      node->value.offset.push_back(empty_nodes[i] * SPACE_SIZE);
+      bit_map[empty_nodes[i]]=1;
+    }
+    need_num-=empty_nodes.size();
+    empty_nodes.clear();
+    
+    uint32_t num = 0, j = (last + 1) % bit_map.size();
+    while (j != last) {
+      //fprintf(stderr,"get from bit map need num=%d\n",need_num);
+      if (!bit_map[j]) {
+        bit_map[j] = 1;
+        node->value.offset.push_back(j * SPACE_SIZE);
+        num++;
+        if (num >= need_num) {
+          last=j;
+          break;
+        }
+      }
+      j=(j+1)%bit_map.size();
+    }
   }
+
+  // node->value.offset.push_back(0);
+  // //取块
+  // uint32_t num = 0, j = 0;
+  // while (j < bit_map.size()) {
+  //   if (!bit_map[j]) {
+  //     bit_map[j] = 1;
+  //     node->value.offset.push_back(j * SPACE_SIZE);
+  //     num++;
+  //     if (num == need_num) {
+  //       break;
+  //     }
+  //   }
+  //   j++;
+  // }
+
   //写块
   size_t cur = 0;
   for (uint32_t i = 0; i < node->value.offset.size() - 1; i++) {
     ssize_t t = pwrite(fd, value.c_str() + cur, SPACE_SIZE,
                        begin + node->value.offset[i]);
-    if (t < 0) {
+    if (t != SPACE_SIZE) {
+      fprintf(stderr,"pwrite error\n");
       return;
     }
     cur += SPACE_SIZE;
   }
-  node->value.size = value.size();
-  size_t left_size =
+  
+  ssize_t left_size =
       value.size() % SPACE_SIZE == 0 ? SPACE_SIZE : value.size() % SPACE_SIZE;
   int index = node->value.offset.size() - 1;
   ssize_t t = pwrite(fd, value.c_str() + cur, left_size,
                      begin + node->value.offset[index]);
-  if (t < 0) {
+  if (t != left_size) {
+    fprintf(stderr,"pwrite error\n");
     return;
   }
-  empty_num -= need_num;
-  
-}
-Status myCache::InsertImpl(const Slice& key, const char* data,
-                           const size_t size, std::string fname) {
-  // MutexLock _(&lock_);
-  std::string skey(key.data(), key.size());
-  int index = getIndex(fname);
-  Status s = v[index].Put(skey, data, size);
-  return s;
 }
 
 Status myCache::Insert(const Slice& key, const char* data, const size_t size,
-                       std::string fname) {
-  // Insert2(std::string(key.data(), key.size()), std::string(data, size), fname);
-  // return Status::OK();
+                        std::string fname) {
+  // Insert2(std::string(key.data(), key.size()), std::string(data, size),
+  // fname); return Status::OK(); if(is_meta)
+  // {
+  //   fprintf(stderr,"insert size=%ld\n",size);
+  // }
+  //fprintf(stderr,"insert size=%ld\n",size);
+  bool is_meta=false;
   if (opt_.pipeline_writes) {
-    insert_ops_.Push(myInsertOp(
-        key.ToString(), std::move(std::string(data, size)), std::move(fname)));
+    insert_ops_.Push(myInsertOp(key.ToString(),
+                                std::move(std::string(data, size)), is_meta,
+                                std::move(fname)));
     return Status::OK();
   }
-  Insert2(std::string(key.data(), key.size()), std::string(data, size), fname);
+  InsertImpl(std::string(key.data(), key.size()), std::string(data, size),
+             is_meta, fname);
   return Status::OK();
 }
 void myCache::InsertMain() {
@@ -658,7 +621,7 @@ void myCache::InsertMain() {
       // that is a secret signal to exit
       break;
     }
-    Insert2(op.key_, op.value_, op.fname_);
+    InsertImpl(op.key_, op.value_, op.is_meta, op.fname_);
   }
 }
 
@@ -668,19 +631,18 @@ Status myCache::Lookup(const Slice& key, std::unique_ptr<char[]>* data,
   std::string skey(key.data(), key.size());
   int index = getIndex(fname);
   Status s = v[index].Get(skey, data, size);
-
   return s;
 }
 
-Status myCache::Insert2(const std::string& key, const std::string& value,
-                        std::string& fname) {
+Status myCache::InsertImpl(const std::string& key, const std::string& value,
+                           bool is_meta, std::string& fname) {
   // MutexLock _(&lock_);
   int index = getIndex(fname, true);
-  v[index].Put(key, value, outall,index);
+  v[index].Put(key, value, outall, is_meta);
   return Status::OK();
 }
 
-int myCache::getIndex(std::string fname, bool ) {
+int myCache::getIndex(std::string fname, bool) {
   if (fname.size() == 0) {
     return 0;
   }
@@ -711,10 +673,10 @@ Status myCache::Open() {
   std::string path = opt_.path;
   path += "/pcache_file";
   // std::string path2 = path + "Get_sst";
-   //std::string path3 = path + "Put_sst";
-  
+  // std::string path3 = path + "Put_sst";
+
   // fp = fopen(path2.c_str(), "w+");
-   //fp2 = fopen(path3.c_str(), "w+");
+  // fp2 = fopen(path3.c_str(), "w+");
   fd = open(path.c_str(), O_RDWR | O_CREAT | O_TRUNC, 0777);
   lseek(fd, opt_.cache_size, SEEK_SET);
   int t = -1;
@@ -725,7 +687,7 @@ Status myCache::Open() {
 
   NUM = opt_.cache_size / SST_SIZE;
   // v.resize(NUM);
-  for (int i = 0; i < NUM; i++) {
+  for (uint64_t i = 0; i < NUM; i++) {
     v[i].Set_Par(fd, SST_SIZE / SPACE_SIZE, i * SST_SIZE);
   }
   if (opt_.pipeline_writes) {
@@ -742,27 +704,23 @@ Status myCache::Close() {
   }
   close(fd);
   // fclose(fp);
-   //fclose(fp2);
-  uint64_t all_empty_num=0;
-  for(int i=0;i<NUM;i++)
-  {
-    all_empty_num+=v[i].empty_num;
+  // fclose(fp2);
+  uint64_t all_empty_num = 0;
+  for (uint64_t i = 0; i < NUM; i++) {
+    all_empty_num += v[i].empty_num;
   }
 
-  fprintf(stderr,"/n/n\n all_empty_num=%ld \n",all_empty_num);
+  fprintf(stderr, "/n/n\n all_empty_num=%ld \n", all_empty_num);
   fprintf(stderr, "/n/n\n outall=%ld\n", outall);
   return Status::OK();
 }
-bool myCache::Erase(const Slice& ) {
-  return true;
-}
-bool myCache::Reserve(const size_t ) {
-  return true;
-}
+bool myCache::Erase(const Slice&) { return true; }
+bool myCache::Reserve(const size_t) { return true; }
 
 bool myCache::IsCompressed() { return opt_.is_compressed; }
 
 std::string myCache::GetPrintableOptions() const { return opt_.ToString(); }
+
 
 }  // namespace rocksdb
 
