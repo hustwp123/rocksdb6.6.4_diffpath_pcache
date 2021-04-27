@@ -3418,6 +3418,9 @@ class Benchmark {
     printf("Initializing RocksDB Options from command-line flags\n");
     Options& options = *opts;
 
+    options.db_paths={{"/home/zyh/480G/wp/db1",100l*1024*1024*1024},
+    {"/home/zyh/480G/wp/db2",200l*1024*1024*1024}};
+
     assert(db_.db == nullptr);
 
     options.env = FLAGS_env;
