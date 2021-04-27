@@ -66,7 +66,11 @@ inline void BlockFetcher::CheckBlockChecksum() {
   }
 }
 
-inline bool BlockFetcher::TryGetUncompressBlockFromPersistentCache() {
+inline bool BlockFetcher::TryGetUncompressBlockFromPersistentCache(int level) {
+  if(level<2)
+  {
+    return false;
+  }
   if (cache_options_.persistent_cache &&
       !cache_options_.persistent_cache->IsCompressed()) {
     Status status = PersistentCacheHelper::LookupUncompressedPage(
@@ -104,7 +108,11 @@ inline bool BlockFetcher::TryGetFromPrefetchBuffer() {
   return got_from_prefetch_buffer_;
 }
 
-inline bool BlockFetcher::TryGetCompressedBlockFromPersistentCache() {
+inline bool BlockFetcher::TryGetCompressedBlockFromPersistentCache(int level) {
+  if(level<2)
+  {
+    return false;
+  }
   if (cache_options_.persistent_cache &&
       cache_options_.persistent_cache->IsCompressed()) {
     // lookup uncompressed cache mode p-cache
@@ -144,7 +152,11 @@ inline void BlockFetcher::PrepareBufferForBlockFromFile() {
   }
 }
 
-inline void BlockFetcher::InsertCompressedBlockToPersistentCacheIfNeeded() {
+inline void BlockFetcher::InsertCompressedBlockToPersistentCacheIfNeeded(int level) {
+  if(level<2)
+  {
+    return;
+  }
   if (status_.ok() && read_options_.fill_cache &&
       cache_options_.persistent_cache &&
       cache_options_.persistent_cache->IsCompressed()) {
@@ -154,7 +166,11 @@ inline void BlockFetcher::InsertCompressedBlockToPersistentCacheIfNeeded() {
   }
 }
 
-inline void BlockFetcher::InsertUncompressedBlockToPersistentCacheIfNeeded() {
+inline void BlockFetcher::InsertUncompressedBlockToPersistentCacheIfNeeded(int level) {
+  if(level<2)
+  {
+    return;
+  }
   if (status_.ok() && !got_from_prefetch_buffer_ && read_options_.fill_cache &&
       cache_options_.persistent_cache &&
       !cache_options_.persistent_cache->IsCompressed()) {
@@ -194,10 +210,10 @@ inline void BlockFetcher::GetBlockContents() {
 #endif
 }
 
-Status BlockFetcher::ReadBlockContents() {
+Status BlockFetcher::ReadBlockContents(int level) {
   block_size_ = static_cast<size_t>(handle_.size());
 
-  if (TryGetUncompressBlockFromPersistentCache()) {
+  if (TryGetUncompressBlockFromPersistentCache(level)) {
     compression_type_ = kNoCompression;
 #ifndef NDEBUG
     contents_->is_raw_block = true;
@@ -208,7 +224,7 @@ Status BlockFetcher::ReadBlockContents() {
     if (!status_.ok()) {
       return status_;
     }
-  } else if (!TryGetCompressedBlockFromPersistentCache()) {
+  } else if (!TryGetCompressedBlockFromPersistentCache(level)) {
     PrepareBufferForBlockFromFile();
     Status s;
 
@@ -254,7 +270,7 @@ Status BlockFetcher::ReadBlockContents() {
 
     CheckBlockChecksum();
     if (status_.ok()) {
-      InsertCompressedBlockToPersistentCacheIfNeeded();
+      InsertCompressedBlockToPersistentCacheIfNeeded(level);
     } else {
       return status_;
     }
@@ -276,7 +292,7 @@ Status BlockFetcher::ReadBlockContents() {
     GetBlockContents();
   }
 
-  InsertUncompressedBlockToPersistentCacheIfNeeded();
+  InsertUncompressedBlockToPersistentCacheIfNeeded(level);
 
   return status_;
 }

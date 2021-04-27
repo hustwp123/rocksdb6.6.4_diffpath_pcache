@@ -62,7 +62,7 @@ class BlockFetcher {
         memory_allocator_compressed_(memory_allocator_compressed),
         for_compaction_(for_compaction) {}
 
-  Status ReadBlockContents();
+  Status ReadBlockContents(int level=2);
   CompressionType get_compression_type() const { return compression_type_; }
 
  private:
@@ -94,16 +94,16 @@ class BlockFetcher {
   bool for_compaction_ = false;
 
   // return true if found
-  bool TryGetUncompressBlockFromPersistentCache();
+  bool TryGetUncompressBlockFromPersistentCache(int level);
   // return true if found
   bool TryGetFromPrefetchBuffer();
-  bool TryGetCompressedBlockFromPersistentCache();
+  bool TryGetCompressedBlockFromPersistentCache(int level);
   void PrepareBufferForBlockFromFile();
   // Copy content from used_buf_ to new heap buffer.
   void CopyBufferToHeap();
   void GetBlockContents();
-  void InsertCompressedBlockToPersistentCacheIfNeeded();
-  void InsertUncompressedBlockToPersistentCacheIfNeeded();
+  void InsertCompressedBlockToPersistentCacheIfNeeded(int level);
+  void InsertUncompressedBlockToPersistentCacheIfNeeded(int level);
   void CheckBlockChecksum();
 };
 }  // namespace rocksdb
